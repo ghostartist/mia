@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Small-World Network</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+
+        canvas {
+            border: 1px solid lightgray;
+            margin: auto;
+            display: block;
+        }
+
+        .controls {
+            margin: 10px auto;
+            text-align: center;
+        }
+
+        .controls label, .controls select, .controls input {
+            margin: 0 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Interactive Small-World Network</h1>
+    <div class="controls">
+        <label for="networkType">Network Type:</label>
+        <select id="networkType">
+            <option value="clustered">Clustered</option>
+            <option value="random">Random</option>
+            <option value="smallworld" selected>Small-World</option>
+        </select>
+
+        <label for="neighbors">Neighbors Per Node:</label>
+        <select id="neighbors">
+            <option value="2">2</option>
+            <option value="4" selected>4</option>
+        </select>
+
+        <label for="randomness">Randomness (%):</label>
+        <input id="randomness" type="range" min="0" max="100" step="1" value="5">
+        <span id="randomnessValue">5</span>%
+    </div>
+
+    <canvas id="networkCanvas" width="800" height="800"></canvas>
+
+    <script>
+        const canvas = document.getElementById("networkCanvas");
+        const ctx = canvas.getContext("2d");
+
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const radius = 300;
+
+        const N = 100;
+        const rotationConstant = (2 * Math.PI) / N;
+        let edges = [];
+        let nodes = [];
+        let networkType = "smallworld";
+        let neighborsPerNode = 4;
+        let randomness = 5;
+
+        document.getElementById("networkType").addEventListener("change", (e) => {
+            networkType = e.target.value;
+            updateNetwork();
+        });
+
+        document.getElementById("neighbors").addEventListener("change", (e) => {
+            neighborsPerNode = parseInt(e.target.value);
+            updateNetwork();
+        });
+
+        document.getElementById("randomness").addEventListener("input", (e) => {
+            randomness = parseInt(e.target.value);
+            document.getElementById("randomnessValue").textContent = randomness;
+            updateNetwork();
+        });
+
+        function createNodes() {
+            nodes = [];
+            for (let i = 0; i < N; i++) {
+                const angle = (i / N) * 2 * Math.PI - Math.PI / 2;
+                const x = centerX + radius * Math.cos(angle);
+                const y = centerY + radius * Math.sin(angle);
+                nodes.push({ id: i, x, y });
+            }
+        }
+
+        function createEdges() {
+            edges = [];
+
+            if (networkType === "random") {
+                // Create random connections only
+                for (let i = 0; i < N; i++) {
+                    let randomNode;
+                    do {
+                        randomNode = Math.floor(Math.random() * N);
+                    } while (randomNode === i || edges.some(([a, b]) => (a === i && b === randomNode) || (a === randomNode && b === i)));
+                    edges.push([i, randomNode]);
+                }
+                return;
+            }
+
+            // For small-world or clustered
+            for (let i = 0; i < N; i++) {
+                // Nearest neighbors
+                edges.push([i, (i + 1) % N]);
+                edges.push([i, (i - 1 + N) % N]);
+
+                if (neighborsPerNode === 4) {
+                    // Second-nearest neighbors
+                    edges.push([i, (i + 2) % N]);
+                    edges.push([i, (i - 2 + N) % N]);
+                }
+            }
+
+            if (networkType === "smallworld") {
+                // Add randomness to small-world network
+                const totalLinks = edges.length;
+                const randomLinksCount = Math.floor((randomness / 100) * totalLinks);
+                for (let i = 0; i < randomLinksCount; i++) {
+                    const index = Math.floor(Math.random() * edges.length);
+                    const [a, b] = edges.splice(index, 1)[0];
+                    let randomNode;
+                    do {
+                        randomNode = Math.floor(Math.random() * N);
+                    } while (
+                        randomNode === a ||
+                        edges.some(([x, y]) => (x === a && y === randomNode) || (x === randomNode && y === a))
+                    );
+                    edges.push([a, randomNode]);
+                }
+            }
+        }
+
+        function findShortestPath(source, target) {
+            const queue = [[source]];
+            const visited = new Set();
+            visited.add(source);
+
+            while (queue.length > 0) {
+                const path = queue.shift();
+                const node = path[path.length - 1];
+
+                if (node === target) {
+                    return path;
+                }
+
+                edges.forEach(([a, b]) => {
+                    const neighbor = a === node ? b : a === b ? a : null;
+                    if (neighbor !== null && !visited.has(neighbor)) {
+                        visited.add(neighbor);
+                        queue.push([...path, neighbor]);
+                    }
+                });
+            }
+
+            return [];
+        }
+
+        function drawNodes() {
+            nodes.forEach((node, i) => {
+                ctx.fillStyle = i === 0 ? "blue" : i === 50 ? "green" : "black";
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 5, 0, 2 * Math.PI);
+                ctx.fill();
+
+                if (i === 0) ctx.fillText("Source", node.x - 30, node.y - 10);
+                if (i === 50) ctx.fillText("Target", node.x - 30, node.y + 20);
+            });
+        }
+
+        function drawEdges(highlightedPath = []) {
+            edges.forEach(([a, b]) => {
+                const nodeA = nodes[a];
+                const nodeB = nodes[b];
+
+                if (Math.abs(a - b) === 2 || Math.abs(a - b) === N - 2) {
+                    // Second-nearest neighbors as semicircles
+                    drawInsideSemiCircle(nodeA, nodeB, a, highlightedPath.includes(a) && highlightedPath.includes(b));
+                } else {
+                    // Nearest neighbors and random links as straight lines
+                    ctx.strokeStyle = highlightedPath.includes(a) && highlightedPath.includes(b) ? "red" : "gray";
+                    ctx.beginPath();
+                    ctx.moveTo(nodeA.x, nodeA.y);
+                    ctx.lineTo(nodeB.x, nodeB.y);
+                    ctx.stroke();
+                }
+            });
+        }
+
+        function drawInsideSemiCircle(startNode, endNode, nodeIndex, highlight = false) {
+            const midX = (startNode.x + endNode.x) / 2;
+            const midY = (startNode.y + endNode.y) / 2;
+            const dx = endNode.x - startNode.x;
+            const dy = endNode.y - startNode.y;
+            const diameter = Math.sqrt(dx * dx + dy * dy);
+            const curveRadius = diameter / 2;
+            const angle = nodeIndex * rotationConstant + Math.PI;
+
+            ctx.save();
+            ctx.translate(midX, midY);
+            ctx.rotate(angle);
+
+            ctx.strokeStyle = highlight ? "red" : "gray";
+            ctx.beginPath();
+            ctx.arc(0, 0, curveRadius, 0, Math.PI, true);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function updateNetwork() {
+            createNodes();
+            createEdges();
+            const shortestPath = findShortestPath(0, 50);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawEdges(shortestPath);
+            drawNodes();
+        }
+
+        updateNetwork();
+    </script>
+</body>
+</html>
